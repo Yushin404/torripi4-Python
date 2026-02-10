@@ -1,4 +1,14 @@
-const ws = new WebSocket(`ws://${location.host}/ws`);
+const proto = (location.protocol === "https:") ? "wss" : "ws";
+const ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+
+/*デバッグ用ログを表示*/ 
+ws.onopen = () => console.log("WS connected");
+ws.onerror = (e) => console.log("WS error", e);
+ws.onclose = () => console.log("WS closed");
+ws.onmessage = (ev) => console.log("WS msg", ev.data);
+
+
 
 const badgeAuto = document.getElementById("badge-auto");
 const badgeCmd = document.getElementById("badge-cmd");
