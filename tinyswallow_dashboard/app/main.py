@@ -13,10 +13,19 @@ from .esp32_udp import Esp32Udp, start_receiver
 from .vision import Vision, bgr_to_jpeg_bytes
 from .llm import build_llm, nl_to_action
 
+import os
+from .drivers.droidcam import DroidCamReader
+from .drivers.mock_commands import MockCommandSink
+
+
 templates = Jinja2Templates(directory="templates")
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+cmd_sink = MockCommandSink()
+droidcam = None
+
 
 # =======================
 # あなたの環境のIP設定
@@ -34,27 +43,46 @@ FRAME_CENTER_X = 240 // 2
 # =======================
 # 初期化（起動時に一回だけ）
 # =======================
-esp = Esp32Udp(LOCAL_UDP_IP, SHARED_UDP_PORT, ESP32_UDP_IP, ESP32_UDP_PORT)
+cmd_sink = MockCommandSink()
+droidcam = None
+esp = None
+
 vision = Vision(model_path="models/stools4-11s.pt", target_class_id=0)
 llm = build_llm()
+
 
 receiver_thread = None
 infer_thread = None
 
 @app.on_event("startup")
 async def on_startup():
-    global receiver_thread, infer_thread
-    receiver_thread = start_receiver(esp)
-    infer_thread = vision.start_infer_loop(fps_limit=15.0)
+    global esp, cmd_sink
 
-    # 自動運転ループをバックグラウンドで回す
+    #本番(ESP)はこっち
+    esp = Esp32Udp("0.0.0.0", 50000, "192.168.1.1", 55555)
+    start_receiver(esp)
+    cmd_sink = esp
+
+    
+    # # テスト（Droidcam）を使っているときは以下のコード
+    # global droidcam
+    # # DroidCam URL（環境変数で差し替え可）
+    # url = os.getenv("DROIDCAM_URL", "http://192.168.11.38:4747/video")
+    # droidcam = DroidCamReader(url=url, target_size=(240, 240))
+    # droidcam.start()
+
+    vision.start_infer_loop(fps_limit=15.0)
     asyncio.create_task(auto_control_loop())
+
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     STATE.running = False
     vision.stop()
+    if droidcam is not None:
+        droidcam.stop()
+
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -122,18 +150,15 @@ async def ws_endpoint(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_json()
-            # data例:
-            # {"type":"manual","cmd":"W"}
-            # {"type":"auto","enabled":true}
-            # {"type":"reverse","enabled":true}
-            # {"type":"nl","text":"自動運転オンにして"}
             msg_type = data.get("type")
 
             if msg_type == "manual":
-                cmd = str(data.get("cmd","")).upper()
-                # 自動中は手動を無効化したい場合はここで弾く
+                cmd = str(data.get("cmd", "")).upper()
+
+                # 自動中は手動を無効化（必要ならこのまま）
                 if not STATE.auto_enabled:
-                    esp.send_command(cmd)
+                    cmd_sink.send_command(cmd)
+
                 await ws.send_json({"ok": True})
 
             elif msg_type == "auto":
@@ -145,22 +170,34 @@ async def ws_endpoint(ws: WebSocket):
                 await ws.send_json({"ok": True, "reverse_flag": STATE.reverse_flag})
 
             elif msg_type == "nl":
-                text = str(data.get("text","")).strip()
-                act = nl_to_action(llm, text)
+                text = str(data.get("text", "")).strip()
+                if not text:
+                    await ws.send_json({"ok": False, "error": "empty text"})
+                    continue
 
-                # 実行
-                if act["action"] == "auto_on":
-                    STATE.auto_enabled = True
-                elif act["action"] == "auto_off":
-                    STATE.auto_enabled = False
-                elif act["action"] == "set_reverse_on":
-                    STATE.reverse_flag = True
-                elif act["action"] == "set_reverse_off":
-                    STATE.reverse_flag = False
-                elif act["action"] == "send":
-                    if not STATE.auto_enabled:
-                        esp.send_command(act["cmd"])
-                await ws.send_json({"ok": True, "parsed": act, "auto_enabled": STATE.auto_enabled})
+                try:
+                    act = nl_to_action(llm, text)
+                    print("[NL]", text, "=>", act)
+
+                    # 実行
+                    if act["action"] == "auto_on":
+                        STATE.auto_enabled = True
+                    elif act["action"] == "auto_off":
+                        STATE.auto_enabled = False
+                    elif act["action"] == "set_reverse_on":
+                        STATE.reverse_flag = True
+                    elif act["action"] == "set_reverse_off":
+                        STATE.reverse_flag = False
+                    elif act["action"] == "send":
+                        if not STATE.auto_enabled:
+                            cmd_sink.send_command(act["cmd"])
+
+                    await ws.send_json({"ok": True, "parsed": act, "auto_enabled": STATE.auto_enabled})
+
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    await ws.send_json({"ok": False, "error": repr(e)})
 
             else:
                 await ws.send_json({"ok": False, "error": "unknown type"})
@@ -184,12 +221,17 @@ async def auto_control_loop():
 
         # あなたの自動制御ロジック（2本目）を移植
         if STATE.target_detected and STATE.target_center_x is not None:
-            diff = abs(STATE.target_center_x - FRAME_CENTER_X)
-            if diff <= CENTER_THRESHOLD:
-                esp.send_command("W")
+            diff = STATE.target_center_x - FRAME_CENTER_X
+            print(diff,"--------------diff---------------")
+            if abs(diff) <= CENTER_THRESHOLD:
+                cmd_sink.send_command("W")
             else:
-                esp.send_command("M")  # 微小回転
+                if diff > 0:
+                    cmd_sink.send_command("M")
+                else:
+                    print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                    cmd_sink.send_command("A")  # 微小回転
         else:
-            esp.send_command("M")
+            cmd_sink.send_command("M")
 
         last_send = now
