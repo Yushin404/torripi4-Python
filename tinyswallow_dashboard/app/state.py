@@ -17,6 +17,7 @@ class SharedState:
     # --- target detection ---
     target_detected: bool = False
     target_center_x: Optional[int] = None
+    size:Optional[int] = None
 
     # --- control ---
     auto_enabled: bool = False     # GUIで切替
