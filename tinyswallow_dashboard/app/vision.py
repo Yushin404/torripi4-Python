@@ -4,14 +4,13 @@ import threading
 import numpy as np
 import cv2
 from ultralytics import YOLO
-
 from .state import STATE
+
 
 class Vision:
     def __init__(self, model_path: str, target_class_id: int = 0):
         self.model = YOLO(model_path)
         self.target_class_id = target_class_id
-
         self._last_frame = None
         self._last_annotated = None
         self._lock = threading.Lock()
@@ -34,6 +33,7 @@ class Vision:
         def loop():
             while self._running and STATE.running:
                 t0 = time.time()
+
                 with self._lock:
                     frame = None if self._last_frame is None else self._last_frame.copy()
 
@@ -48,6 +48,8 @@ class Vision:
                 # target detect
                 detected = False
                 center_x = None
+                size1 = None
+
                 if boxes is not None:
                     for box in boxes:
                         cls = int(box.cls[0])
@@ -55,12 +57,15 @@ class Vision:
                             x1, y1, x2, y2 = box.xyxy[0]
                             center_x = int((x1 + x2) / 2)
                             detected = True
+                            size1 = (y2 - y1)*(x2-x1)
                             break
 
                 STATE.target_detected = detected
                 STATE.target_center_x = center_x
+                STATE.size = size1
 
                 annotated = r0.plot()  # BGR image
+
                 with self._lock:
                     self._last_annotated = annotated
 
