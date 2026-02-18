@@ -36,7 +36,7 @@ ESP32_UDP_IP = "192.168.1.1"
 ESP32_UDP_PORT = 55555
 
 # 自動運転パラメータ（あなたの2本目に合わせたもの）
-CENTER_THRESHOLD = 80
+CENTER_THRESHOLD = 60
 SEND_INTERVAL = 0.1
 FRAME_CENTER_X = 240 // 2
 
@@ -209,6 +209,12 @@ async def ws_endpoint(ws: WebSocket):
 # ---------- 自動運転ループ ----------
 async def auto_control_loop():
     last_send = 0.0
+    last_reverse = 0.0  # ★追加：バック用タイマー
+
+    REVERSE_INTERVAL = 10.0   # ★5秒に1回
+    REVERSE_DURATION = 0.75   # ★バックする時間（短く調整）
+    ROTATE_DURATION=0.3 #回転する時間
+
     while STATE.running:
         await asyncio.sleep(0.01)
 
@@ -216,12 +222,31 @@ async def auto_control_loop():
             continue
 
         now = time.time()
+
+        # =========================
+        # ★ 5秒に1回 少しバック
+        # =========================
+        if now - last_reverse > REVERSE_INTERVAL:
+            cmd_sink.send_command("S")   # 後退
+            await asyncio.sleep(REVERSE_DURATION)
+            cmd_sink.send_command("D") #後退後少し回転
+            await asyncio.sleep(ROTATE_DURATION)
+            last_reverse = time.time()
+            last_send = last_reverse
+            continue
+
+        # =========================
+        # 通常の送信間隔制御
+        # =========================
         if now - last_send < SEND_INTERVAL:
             continue
 
-        # あなたの自動制御ロジック（2本目）を移植
+        # =========================
+        # 既存の自動追従ロジック
+        # =========================
         if STATE.target_detected and STATE.target_center_x is not None:
             diff = STATE.target_center_x - FRAME_CENTER_X
+            print(str(STATE.size))
             if abs(diff) <= CENTER_THRESHOLD:
                 cmd_sink.send_command("W")
             else:
