@@ -47,7 +47,7 @@ cmd_sink = MockCommandSink()
 droidcam = None
 esp = None
 
-vision = Vision(model_path="models/stools4-11s.pt", target_class_id=0)
+vision = Vision(model_path="models/stools5-11s.pt", target_class_id=0)
 llm = build_llm()
 
 
@@ -222,16 +222,14 @@ async def auto_control_loop():
         # あなたの自動制御ロジック（2本目）を移植
         if STATE.target_detected and STATE.target_center_x is not None:
             diff = STATE.target_center_x - FRAME_CENTER_X
-            print(diff,"--------------diff---------------")
             if abs(diff) <= CENTER_THRESHOLD:
                 cmd_sink.send_command("W")
             else:
                 if diff > 0:
-                    cmd_sink.send_command("M")
+                    cmd_sink.send_command("D")
                 else:
-                    print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-                    cmd_sink.send_command("A")  # 微小回転
+                    cmd_sink.send_command("A")
         else:
-            cmd_sink.send_command("M")
+            cmd_sink.send_command("D")
 
         last_send = now
