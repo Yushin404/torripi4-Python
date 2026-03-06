@@ -8,9 +8,12 @@ from .state import STATE
 
 
 class Vision:
-    def __init__(self, model_path: str, target_class_id: int = 0):
+    def __init__(self, model_path: str, priority_class_ids: list[int] | None = None):
         self.model = YOLO(model_path)
-        self.target_class_id = target_class_id
+
+        # 優先順位: clip(1) > stool(0)
+        self.priority_class_ids = priority_class_ids or [1, 0]
+
         self._last_frame = None
         self._last_annotated = None
         self._lock = threading.Lock()
@@ -45,24 +48,42 @@ class Vision:
                 r0 = results[0]
                 boxes = r0.boxes
 
-                # target detect
+                # target detect: clip優先
                 detected = False
                 center_x = None
                 size1 = None
+                target_cls = None
 
-                if boxes is not None:
+                if boxes is not None and len(boxes) > 0:
+                    det_list = []
+
                     for box in boxes:
                         cls = int(box.cls[0])
-                        if cls == self.target_class_id:
-                            x1, y1, x2, y2 = box.xyxy[0]
-                            center_x = int((x1 + x2) / 2)
-                            detected = True
-                            size1 = (y2 - y1)*(x2-x1)
-                            break
+                        conf = float(box.conf[0]) if box.conf is not None else 0.0
+                        x1, y1, x2, y2 = box.xyxy[0]
+                        area = float((y2 - y1) * (x2 - x1))
+                        det_list.append((cls, conf, area, x1, y1, x2, y2))
+
+                    # clip -> stool の順に探す
+                    for cid in self.priority_class_ids:
+                        cand = [d for d in det_list if d[0] == cid]
+                        if not cand:
+                            continue
+
+                        # 同じクラスが複数あるときは confidence 最大を採用
+                        best = max(cand, key=lambda d: d[1])
+                        cls, conf, area, x1, y1, x2, y2 = best
+
+                        center_x = int((x1 + x2) / 2)
+                        detected = True
+                        size1 = int(area)
+                        target_cls = cls
+                        break
 
                 STATE.target_detected = detected
                 STATE.target_center_x = center_x
                 STATE.size = size1
+                STATE.target_class_id = target_cls
 
                 annotated = r0.plot()  # BGR image
 
