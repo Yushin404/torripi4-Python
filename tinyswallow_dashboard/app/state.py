@@ -17,10 +17,11 @@ class SharedState:
     # --- target detection ---
     target_detected: bool = False
     target_center_x: Optional[int] = None
-    size:Optional[int] = None
+    size: Optional[int] = None
+    target_class_id: Optional[int] = None   # 追加
 
     # --- control ---
-    auto_enabled: bool = False     # GUIで切替
+    auto_enabled: bool = False
     last_cmd: str = ""
     telemetry: Dict[str, Any] = field(default_factory=dict)
 
