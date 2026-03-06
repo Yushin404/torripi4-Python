@@ -37,7 +37,7 @@ ESP32_UDP_PORT = 55555
 
 # 自動運転パラメータ（あなたの2本目に合わせたもの）
 CENTER_THRESHOLD = 60
-SEND_INTERVAL = 0.1
+SEND_INTERVAL = 0.15
 FRAME_CENTER_X = 240 // 2
 
 # =======================
@@ -211,6 +211,9 @@ async def auto_control_loop():
     last_send = 0.0
     last_reverse = 0.0  # ★追加：バック用タイマー
 
+    clip_pause_done = False
+    last_clip_detected = False
+
     REVERSE_INTERVAL = 10.0   # ★5秒に1回
     REVERSE_DURATION = 0.75   # ★バックする時間（短く調整）
     ROTATE_DURATION=0.3 #回転する時間
@@ -220,6 +223,16 @@ async def auto_control_loop():
 
         if not STATE.auto_enabled:
             continue
+
+        # ===== clip検出時の0.5秒停止 =====
+        is_clip = (STATE.target_class_id == 0)
+
+        # clipが新しく見えた瞬間
+        if is_clip and not last_clip_detected:
+            cmd_sink.send_command("W")   # STOP
+            await asyncio.sleep(0.5)
+
+        last_clip_detected = is_clip
 
         now = time.time()
 
