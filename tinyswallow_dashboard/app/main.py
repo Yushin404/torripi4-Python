@@ -47,7 +47,7 @@ cmd_sink = MockCommandSink()
 droidcam = None
 esp = None
 
-vision = Vision(model_path="models/stools5-11s.pt", target_class_id=0)
+vision = Vision(model_path="models/stools6-11s.pt", priority_class_ids=[0, 1])
 llm = build_llm()
 
 
