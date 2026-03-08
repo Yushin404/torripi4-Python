@@ -99,7 +99,7 @@ http://192.168.1.xxx:8000
 
 ---
 
-# プロジェクト構成
+# プロジェクト構成（2026/03時点）
 
 ```
 tinyswallow_dashboard/
@@ -162,7 +162,3 @@ Web Dashboard (Browser)
 ```
 
 ---
-
-# ライセンス
-
-MIT License
