@@ -47,7 +47,7 @@ cmd_sink = MockCommandSink()
 droidcam = None
 esp = None
 
-vision = Vision(model_path="models/stools6-11s.pt", priority_class_ids=[0, 1])
+vision = Vision(model_path="models/stools7-11s.pt", priority_class_ids=[0, 2])
 llm = build_llm()
 
 
@@ -96,8 +96,22 @@ def status():
         "auto_enabled": STATE.auto_enabled,
         "reverse_flag": STATE.reverse_flag,
         "last_cmd": STATE.last_cmd,
+
+        "clip_detected": STATE.clip_detected,
+        "clip_center_x": STATE.clip_center_x,
+        "clip_size": STATE.clip_size,
+
+        "cone_detected": STATE.cone_detected,
+        "cone_center_x": STATE.cone_center_x,
+        "cone_size": STATE.cone_size,
+
+        "stool_detected": STATE.stool_detected,
+        "stool_center_x": STATE.stool_center_x,
+        "stool_size": STATE.stool_size,
+
         "target_detected": STATE.target_detected,
         "target_center_x": STATE.target_center_x,
+        "target_class_id": STATE.target_class_id,
         "telemetry": STATE.telemetry,
     })
 
@@ -209,14 +223,16 @@ async def ws_endpoint(ws: WebSocket):
 # ---------- 自動運転ループ ----------
 async def auto_control_loop():
     last_send = 0.0
-    last_reverse = 0.0  # ★追加：バック用タイマー
+    last_reverse = 0.0
 
-    clip_pause_done = False
-    last_clip_detected = False
+    REVERSE_INTERVAL = 10.0
+    REVERSE_DURATION = 0.75
+    ROTATE_DURATION = 0.3
 
-    REVERSE_INTERVAL = 10.0   # ★5秒に1回
-    REVERSE_DURATION = 0.75   # ★バックする時間（短く調整）
-    ROTATE_DURATION=0.3 #回転する時間
+    CLIP_FORWARD_TIME = 0.5
+    CONE_CENTER_THRESHOLD = 50
+    STOOL_CENTER_THRESHOLD = CENTER_THRESHOLD
+    CLIP_CENTER_THRESHOLD = CENTER_THRESHOLD
 
     while STATE.running:
         await asyncio.sleep(0.01)
@@ -224,50 +240,76 @@ async def auto_control_loop():
         if not STATE.auto_enabled:
             continue
 
-        # ===== clip検出時の0.5秒停止 =====
-        is_clip = (STATE.target_class_id == 0)
-
-        # clipが新しく見えた瞬間
-        if is_clip and not last_clip_detected:
-            cmd_sink.send_command("W")   # STOP
-            await asyncio.sleep(0.5)
-
-        last_clip_detected = is_clip
-
         now = time.time()
 
-        # =========================
-        # ★ 5秒に1回 少しバック
-        # =========================
+        # 定期バック
         if now - last_reverse > REVERSE_INTERVAL:
-            cmd_sink.send_command("S")   # 後退
+            cmd_sink.send_command("S")
             await asyncio.sleep(REVERSE_DURATION)
-            cmd_sink.send_command("D") #後退後少し回転
+
+            cmd_sink.send_command("D")
             await asyncio.sleep(ROTATE_DURATION)
+
             last_reverse = time.time()
             last_send = last_reverse
             continue
 
-        # =========================
-        # 通常の送信間隔制御
-        # =========================
         if now - last_send < SEND_INTERVAL:
             continue
 
-        # =========================
-        # 既存の自動追従ロジック
-        # =========================
-        if STATE.target_detected and STATE.target_center_x is not None:
-            diff = STATE.target_center_x - FRAME_CENTER_X
-            print(str(STATE.size))
-            if abs(diff) <= CENTER_THRESHOLD:
+        cone_detected = STATE.cone_detected
+        cone_center_x = STATE.cone_center_x
+
+        clip_detected = STATE.clip_detected
+        clip_center_x = STATE.clip_center_x
+
+        stool_detected = STATE.stool_detected
+        stool_center_x = STATE.stool_center_x
+
+        # 1) cone回避
+        if cone_detected and cone_center_x is not None:
+            cone_diff = cone_center_x - FRAME_CENTER_X
+
+            if abs(cone_diff) <= CONE_CENTER_THRESHOLD:
+                if cone_diff >= 0:
+                    cmd_sink.send_command("A")
+                else:
+                    cmd_sink.send_command("D")
+
+                last_send = now
+                continue
+
+        # 2) clip優先
+        if clip_detected and clip_center_x is not None:
+            clip_diff = clip_center_x - FRAME_CENTER_X
+
+            if abs(clip_diff) <= CLIP_CENTER_THRESHOLD:
                 cmd_sink.send_command("W")
+                await asyncio.sleep(CLIP_FORWARD_TIME)
             else:
-                if diff > 0:
+                if clip_diff > 0:
                     cmd_sink.send_command("D")
                 else:
                     cmd_sink.send_command("A")
-        else:
-            cmd_sink.send_command("D")
 
+            last_send = time.time()
+            continue
+
+        # 3) stool追従
+        if stool_detected and stool_center_x is not None:
+            stool_diff = stool_center_x - FRAME_CENTER_X
+
+            if abs(stool_diff) <= STOOL_CENTER_THRESHOLD:
+                cmd_sink.send_command("W")
+            else:
+                if stool_diff > 0:
+                    cmd_sink.send_command("D")
+                else:
+                    cmd_sink.send_command("A")
+
+            last_send = now
+            continue
+
+        # 4) 探索
+        cmd_sink.send_command("D")
         last_send = now
