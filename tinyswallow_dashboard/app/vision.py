@@ -23,8 +23,8 @@ class Vision:
         # -----------------------------
         # temporal filter parameters
         # -----------------------------
-        self.clip_confirm_frames = 2
-        self.stool_confirm_frames = 2
+        self.clip_confirm_frames = 3
+        self.stool_confirm_frames = 1
         self.cone_confirm_frames = 1  # coneは即反応
 
         self.clip_hold_frames = 3
