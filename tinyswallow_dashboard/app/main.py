@@ -227,7 +227,7 @@ async def auto_control_loop():
 
     REVERSE_INTERVAL = 10.0
     REVERSE_DURATION = 0.75
-    ROTATE_DURATION = 0.3
+    ROTATE_DURATION = 1.0
 
     CLIP_FORWARD_TIME = 0.5
     CONE_CENTER_THRESHOLD = 50
